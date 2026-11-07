@@ -4,92 +4,72 @@ on:
   workflow_dispatch:
     inputs:
       zip_path:
-        description: 'Path zip di repo (contoh: uploads/flutter_xxx.zip)'
+        description: Uploaded Flutter project ZIP path
         required: true
         type: string
 
 permissions:
-  contents: write
-  actions: read
+  contents: read
+
+concurrency:
+  group: flutter-apk-build-${{github.run_id}}
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 45
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify zip exists
-        run: |
-          if [ ! -f "${{ github.event.inputs.zip_path }}" ]; then
-            echo "❌ File tidak ditemukan: ${{ github.event.inputs.zip_path }}"
-            ls -la uploads/ || true
-            exit 1
-          fi
-          echo "✅ Zip ditemukan"
-          ls -lh "${{ github.event.inputs.zip_path }}"
-
-      - name: Extract zip
-        run: |
-          mkdir -p project
-          unzip -q "${{ github.event.inputs.zip_path }}" -d project
-          echo "=== Isi project ==="
-          ls -la project/
-          # Jika zip berisi subfolder tunggal, pindahkan isinya
-          if [ "$(ls -1 project | wc -l)" = "1" ] && [ -d "project/$(ls -1 project | head -1)" ]; then
-            SUB=$(ls -1 project | head -1)
-            echo "Memindahkan isi project/$SUB ke project/"
-            shopt -s dotglob
-            mv project/$SUB/* project/
-            rmdir project/$SUB
-          fi
-          echo "=== Setelah normalisasi ==="
-          ls -la project/
-          if [ ! -f "project/pubspec.yaml" ]; then
-            echo "❌ pubspec.yaml tidak ditemukan — zip bukan project Flutter!"
-            exit 1
-          fi
-
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
-      - name: Setup Flutter
+      - name: Setup Flutter (Dart 3.8.1+)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
-          channel: 'stable'
+          flutter-version: '3.32.4'
+          channel: stable
           cache: true
 
-      - name: Flutter pub get
-        working-directory: project
-        run: flutter pub get
-
-      - name: Flutter build APK
-        working-directory: project
+      - name: Verify uploaded ZIP
+        shell: bash
+        env:
+          ZIP_PATH: ${{ inputs.zip_path }}
         run: |
-          flutter build apk --release --no-tree-shake-icons
-          echo "=== APK hasil ==="
-          ls -lh build/app/outputs/flutter-apk/
+          set -euo pipefail
+          test -f "$ZIP_PATH" || { echo "ZIP tidak ditemukan: $ZIP_PATH"; exit 1; }
+          unzip -t "$ZIP_PATH"
+          mkdir -p flutter_project
+          unzip -q "$ZIP_PATH" -d flutter_project
+
+      - name: Locate Flutter project and build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          PUBSPEC=$(find flutter_project -type f -name pubspec.yaml -not -path '*/.dart_tool/*' | awk 'NR==1 {best=$0; n=length($0)} length($0)<n {best=$0; n=length($0)} END {print best}')
+          if [ -z "$PUBSPEC" ]; then echo 'pubspec.yaml tidak ditemukan di dalam ZIP'; exit 1; fi
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+          echo "Flutter project: $PROJECT_DIR"
+          echo "Flutter/Dart versions:"
+          flutter --version
+          cd "$PROJECT_DIR"
+          flutter pub get
+          flutter build apk --release
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK" || { echo 'APK release tidak ditemukan atau kosong'; exit 1; }
+          echo "APK berhasil dibuat: $APK"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
-          path: project/build/app/outputs/flutter-apk/app-release.apk
+          name: flutter-apk
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
-          retention-days: 7
-
-      - name: Cleanup uploaded zip
-        if: always()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          rm -f "${{ github.event.inputs.zip_path }}"
-          git add -A
-          git diff --staged --quiet || git commit -m "Auto-cleanup zip after build"
-          git push || true
+          retention-days: 3
