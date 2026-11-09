@@ -43,7 +43,12 @@ jobs:
           ZIP_PATH: ${{ inputs.zip_path }}
         run: |
           set -euo pipefail
-          test -f "$ZIP_PATH" || { echo "ZIP tidak ditemukan: $ZIP_PATH"; exit 1; }
+          if [ ! -f "$ZIP_PATH" ]; then
+            ls "${ZIP_PATH}".part* > /dev/null 2>&1 || { echo "ZIP/part tidak ditemukan: $ZIP_PATH"; exit 1; }
+            echo "Menyambung part ZIP ..."
+            ls -1 "${ZIP_PATH}".part* | sort | xargs cat > "$ZIP_PATH"
+          fi
+          ls -l "$ZIP_PATH"
           unzip -t "$ZIP_PATH"
           mkdir -p flutter_project
           unzip -q "$ZIP_PATH" -d flutter_project
