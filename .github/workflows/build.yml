@@ -70,6 +70,23 @@ jobs:
             sed -i 's/-all.zip/-bin.zip/' "$GP"
             sed -i '/^networkTimeout=/d' "$GP"
             printf '\nnetworkTimeout=120000\n' >> "$GP"
+            FILE=$(grep -oE 'gradle-[0-9.]+-(all|bin)[.]zip' "$GP" | head -1 | sed 's/-all[.]zip/-bin.zip/')
+            if [ -n "$FILE" ]; then
+              mkdir -p "$HOME/gradle-dist"; DEST="$HOME/gradle-dist/$FILE"; GOT=0
+              for URL in "https://mirrors.cloud.tencent.com/gradle/$FILE" "https://repo.huaweicloud.com/gradle/$FILE" "https://downloads.gradle.org/distributions/$FILE" "https://services.gradle.org/distributions/$FILE"; do
+                for t in 1 2 3; do
+                  echo "Unduh Gradle: $URL (percobaan $t)"
+                  if curl -fsSL --connect-timeout 20 --max-time 300 -o "$DEST" "$URL" && unzip -tq "$DEST" > /dev/null 2>&1; then GOT=1; break 2; fi
+                  rm -f "$DEST"; sleep 5
+                done
+              done
+              if [ "$GOT" = 1 ]; then
+                sed -i '/^distributionUrl=/d;/^distributionSha256Sum=/d' "$GP"
+                printf 'distributionUrl=file\\://%s\n' "$DEST" >> "$GP"
+                echo 'Gradle diambil dari mirror dan dipakai lokal'; ls -l "$DEST"
+              else
+                echo 'Peringatan: semua mirror Gradle gagal, memakai URL bawaan project'; fi
+            fi
             echo 'gradle-wrapper.properties:'; cat "$GP"
           fi
           mkdir -p ~/.gradle
