@@ -65,7 +65,22 @@ jobs:
           flutter --version
           cd "$PROJECT_DIR"
           flutter pub get
-          flutter build apk --release
+          GP=android/gradle/wrapper/gradle-wrapper.properties
+          if [ -f "$GP" ]; then
+            sed -i 's/-all.zip/-bin.zip/' "$GP"
+            sed -i '/^networkTimeout=/d' "$GP"
+            printf '\nnetworkTimeout=120000\n' >> "$GP"
+            echo 'gradle-wrapper.properties:'; cat "$GP"
+          fi
+          mkdir -p ~/.gradle
+          printf 'org.gradle.daemon=false\nsystemProp.org.gradle.internal.http.connectionTimeout=120000\nsystemProp.org.gradle.internal.http.socketTimeout=120000\nsystemProp.org.gradle.internal.repository.max.tentatives=6\nsystemProp.org.gradle.internal.repository.initial.backoff=2000\n' >> ~/.gradle/gradle.properties
+          OK=0
+          for i in 1 2 3; do
+            echo "=== Build attempt $i/3 ==="
+            if flutter build apk --release; then OK=1; break; fi
+            sleep 20
+          done
+          [ "$OK" = 1 ] || { echo 'Build gagal setelah 3 percobaan'; exit 1; }
           APK=build/app/outputs/flutter-apk/app-release.apk
           test -s "$APK" || { echo 'APK release tidak ditemukan atau kosong'; exit 1; }
           echo "APK berhasil dibuat: $APK"
