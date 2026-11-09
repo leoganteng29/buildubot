@@ -65,6 +65,12 @@ jobs:
           flutter --version
           cd "$PROJECT_DIR"
           flutter pub get
+          for F in android/app/build.gradle android/app/build.gradle.kts; do
+            if [ -f "$F" ]; then
+              perl -pi -e 's/^([ \t]*)minSdk(?:Version)?([ \t]*=[ \t]*|[ \t]+)(flutter\.minSdkVersion|(\d+))[ \t]*$/(defined($4) && $4 >= 24) ? $& : "$1minSdk = 24"/e' "$F"
+              echo "minSdk di $F:"; grep -nE 'minSdk' "$F" || true
+            fi
+          done
           GP=android/gradle/wrapper/gradle-wrapper.properties
           if [ -f "$GP" ]; then
             sed -i 's/-all.zip/-bin.zip/' "$GP"
